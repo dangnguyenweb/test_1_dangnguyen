@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Vườn cây thông minh AR</title>
+
+<!-- Thư viện (tải từ internet, không cần cài gì) -->
+<script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.1.4/dist/mindar-image-aframe.prod.js"></script>
+
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent}
+  canvas.a-canvas{touch-action:none}
+
+  #ui{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10000;pointer-events:none}
+  #ui > *{pointer-events:auto}
+
+  #hud{position:absolute;top:10px;left:10px;width:230px;padding:10px 12px;color:#fff;
+    background:rgba(15,25,20,.74);border-radius:14px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  #hud .row{display:flex;justify-content:space-between;font-size:14px}
+  #hud b{font-size:17px}
+  .bar{height:8px;background:rgba(255,255,255,.2);border-radius:4px;margin:4px 0 9px;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:4px;transition:width .3s,background .3s}
+  #hbar{background:#4aa8ff}
+  #status{font-size:13px;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.12)}
+  #status.ok{background:rgba(60,180,90,.45)}
+  #status.warn{background:rgba(240,160,40,.5)}
+  #status.bad{background:rgba(220,70,60,.55)}
+  #track{font-size:12px;opacity:.9;margin-top:6px;line-height:1.35}
+
+  #modeLink{position:absolute;top:10px;right:10px;padding:9px 13px;border-radius:20px;font-size:13px;
+    color:#fff;text-decoration:none;background:rgba(15,25,20,.74)}
+
+  #panel{position:absolute;left:0;right:0;bottom:0;padding:10px 12px 14px;
+    background:rgba(15,25,20,.84);border-radius:16px 16px 0 0;max-height:55vh;overflow:auto;color:#fff}
+  .group{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .lbl{flex:1 1 100px;font-size:14px}
+  button{font:inherit;font-size:14px;border:0;border-radius:10px;padding:10px 12px;min-height:44px;
+    background:#2f8f5b;color:#fff;cursor:pointer}
+  button:active{transform:scale(.96)}
+  button.step{width:60px;font-size:20px;font-weight:700}
+  button.water{background:#2a7fd4}
+  button.alt{background:#3b4b57}
+  button.alt.on{background:#d9480f}
+  button.preset{background:#6a4fb3;flex:1 1 auto}
+  #toggle{width:100%;min-height:34px;padding:4px;margin-bottom:6px;background:rgba(255,255,255,.12);font-size:13px}
+
+  #toast{position:absolute;left:50%;top:36%;transform:translateX(-50%);max-width:86%;text-align:center;
+    background:rgba(0,0,0,.78);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;
+    opacity:0;transition:opacity .25s;pointer-events:none!important}
+  #toast.show{opacity:1}
+</style>
+</head>
+
+<body>
+
+<!-- ============ GIAO DIỆN (chỉ số + nút bấm) ============ -->
+<div id="ui">
+  <div id="hud">
+    <div class="row"><span>🌡️ Nhiệt độ</span><b id="tv">27°C</b></div>
+    <div class="bar"><i id="tbar"></i></div>
+    <div class="row"><span>💧 Độ ẩm</span><b id="hv">65%</b></div>
+    <div class="bar"><i id="hbar"></i></div>
+    <div id="status">...</div>
+    <div id="track"></div>
+  </div>
+
+  <a id="modeLink" href="#"></a>
+
+  <div id="toast"></div>
+
+  <div id="panel">
+    <button id="toggle" data-a="toggle">▼ Thu gọn bảng điều khiển</button>
+    <div id="controls">
+      <div class="group">
+        <span class="lbl">🌡️ Nhiệt độ</span>
+        <button class="step" data-a="t-">−</button>
+        <button class="step" data-a="t+">+</button>
+      </div>
+      <div class="group">
+        <span class="lbl">💧 Độ ẩm</span>
+        <button class="step" data-a="h-">−</button>
+        <button class="step" data-a="h+">+</button>
+      </div>
+      <div class="group">
+        <button class="water" data-a="water">🚿 Tưới nước</button>
+        <button class="alt" id="nightBtn" data-a="night">🌙 Ban đêm</button>
+        <button class="alt" id="frameBtn" data-a="frame">📐 Viền A3: Tắt</button>
+        <button class="alt" data-a="reset">↺ Đặt lại</button>
+      </div>
+      <div class="group">
+        <span class="lbl" style="flex-basis:100%">Kịch bản nhanh:</span>
+        <button class="preset" data-p="ideal">✅ Lý tưởng</button>
+        <button class="preset" data-p="dry">🥀 Khô hạn</button>
+        <button class="preset" data-p="hot">🔥 Quá nóng</button>
+        <button class="preset" data-p="cold">❄️ Quá lạnh</button>
+        <button class="preset" data-p="wet">🌊 Úng nước</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =====================================================================
+     CẤU HÌNH – phần duy nhất bạn có thể cần sửa (chỉ đổi con số / tên file)
+     ===================================================================== */
+  var CONFIG = {
+    // File nhận diện tờ A3 (tạo từ MindAR Compiler, đặt cạnh index.html).
+    // Nếu KHÔNG tìm thấy file này, trang tự dùng ảnh mẫu của MindAR để bạn thử.
+    TARGET_FILE: './targets.mind',
+    SAMPLE_TARGET: 'https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.1.4/examples/image-tracking/assets/card-example/card.mind',
+
+    // Tỉ lệ  cạnh ngắn / cạnh dài của tờ giấy.  A3 nằm ngang = 0.7071 (297/420).
+    // Khuyến nghị dùng A3 NẰM NGANG. (Nếu ảnh bạn compile khác tỉ lệ, sửa số này.)
+    PAPER_H: 0.7071,
+
+    AR_SCALE: 1.0,       // phóng to/thu nhỏ CẢ khu vườn (1.0 = vừa khít tờ giấy)
+    TREE_SCALE: 1.0,     // phóng to/thu nhỏ riêng CÂY LỚN ở giữa (1.3 = to hơn 30%)
+    GRASS_TUFTS: 22,     // số cụm cỏ nhỏ (giảm nếu điện thoại yếu bị giật)
+    SHOW_FRAME: false,   // true = hiện viền đỏ quanh tờ A3 ngay từ đầu (để kiểm tra mô hình có khớp tờ giấy)
+
+    // Độ bám mốc (MindAR). Thông số mặc định thường đã tốt; chỉnh nếu cần:
+    //  FILTER_MIN_CF  nhỏ hơn => mô hình ít rung hơn (nhưng trễ hơn)
+    //  FILTER_BETA    lớn hơn => bớt trễ khi di chuyển nhanh (nhưng rung hơn)
+    //  WARMUP         số khung hình thấy mốc liên tục thì mới hiện mô hình
+    //  MISS           số khung hình mất mốc liên tục thì mới ẩn mô hình (lớn = ít chớp tắt)
+    FILTER_MIN_CF: 0.001,
+    FILTER_BETA: 1000,
+    WARMUP: 3,
+    MISS: 12,
+
+    START_TEMP: 27,   // nhiệt độ ban đầu (°C)
+    START_HUM: 65,    // độ ẩm ban đầu (%)
+    TEMP_MIN: 5, TEMP_MAX: 45,
+    TEMP_STEP: 2,     // mỗi lần bấm +/− nhiệt độ
+    HUM_STEP: 5,      // mỗi lần bấm +/− độ ẩm
+    WATER_ADD: 15,    // nút "Tưới nước" tăng bao nhiêu % độ ẩm
+
+    // Vùng điều kiện lý tưởng
+    IDEAL_T_MIN: 22, IDEAL_T_MAX: 30,
+    IDEAL_H_MIN: 55, IDEAL_H_MAX: 80
+  };
+
+  /* ===================== CHẾ ĐỘ: AR hay XEM THỬ ===================== */
+  var params = new URLSearchParams(location.search);
+  var MODE = params.get('mode') || (location.protocol === 'file:' ? 'demo' : 'ar');
+  var IS_AR = (MODE === 'ar');
+
+  /* ===================== TIỆN ÍCH ===================== */
+  var $ = function (id) { return document.getElementById(id); };
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function f4(n) { return Math.round(n * 10000) / 10000; }
+  function v3(x, y, z) { return f4(x) + ' ' + f4(y) + ' ' + f4(z); }
+
+  // Bộ sinh số ngẫu nhiên cố định (mỗi lần mở, khu vườn giống hệt nhau)
+  var seed = 20261126;
+  function rnd() {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /* ===================== KÍCH THƯỚC KHU VƯỜN =====================
+     1 đơn vị = chiều rộng tờ giấy (420 mm với A3).
+     Khu vườn phủ khít tờ giấy, chừa lề 6% để lộ họa tiết mốc.            */
+  var D  = CONFIG.PAPER_H;          // chiều sâu tờ giấy
+  var ZS = D / 0.7071;              // hệ số giãn theo chiều sâu
+  var GY = 0.03;                    // độ dày thảm cỏ (mặt cỏ cao 0.03)
+  var BW = 0.88, BD = 0.62 * ZS;    // kích thước thảm cỏ (rộng x sâu)
+  function Z(z) { return f4(z * ZS); }
+
+  /* ===================== TRẠNG THÁI ===================== */
+  var state = { temp: CONFIG.START_TEMP, hum: CONFIG.START_HUM, night: false, frame: CONFIG.SHOW_FRAME };
+  var rainUntil = 0;
+  var G = {};      // tham chiếu tới các phần tử 3D (gán khi dựng cảnh)
+
+  // Đánh giá mức "stress" của cây theo nhiệt độ và độ ẩm
+  function analyse() {
+    var t = state.temp, h = state.hum;
+    var s = {
+      dry:  clamp((CONFIG.IDEAL_H_MIN - h) / 35, 0, 1),
+      wet:  clamp((h - 85) / 15, 0, 1),
+      hot:  clamp((t - (CONFIG.IDEAL_T_MAX + 2)) / 8, 0, 1),
+      cold: clamp(((CONFIG.IDEAL_T_MIN - 4) - t) / 10, 0, 1)
+    };
+    var key = 'ok', max = 0.03;
+    for (var k in s) { if (s[k] > max) { max = s[k]; key = k; } }
+    var ideal = t >= CONFIG.IDEAL_T_MIN && t <= CONFIG.IDEAL_T_MAX &&
+                h >= CONFIG.IDEAL_H_MIN && h <= CONFIG.IDEAL_H_MAX;
+    return { s: s, key: key, stress: key === 'ok' ? 0 : max, ideal: ideal };
+  }
+
+  var MSG = {
+    ideal: ['✅ Điều kiện lý tưởng – cây ra hoa', 'ok'],
+    ok:    ['🙂 Bình thường – cây sống tốt', 'ok'],
+    dry:   ['🥀 Thiếu nước – lá vàng, héo', 'bad'],
+    wet:   ['🌊 Úng nước – nguy cơ thối rễ', 'warn'],
+    hot:   ['🔥 Quá nóng – lá cháy sém', 'bad'],
+    cold:  ['❄️ Quá lạnh – cây chậm phát triển', 'warn']
+  };
+  function statusOf(a) { return MSG[(a.ideal && a.key === 'ok') ? 'ideal' : a.key]; }
+
+  /* ===================== CẬP NHẬT GIAO DIỆN ===================== */
+  function render() {
+    var a = analyse(), m = statusOf(a);
+    $('tv').textContent = state.temp + '°C';
+    $('hv').textContent = state.hum + '%';
+    $('tbar').style.width = ((state.temp - CONFIG.TEMP_MIN) / (CONFIG.TEMP_MAX - CONFIG.TEMP_MIN) * 100) + '%';
+    $('hbar').style.width = state.hum + '%';
+    var tcol = a.s.hot > 0.03 ? '#ff6a3d' : (a.s.cold > 0.03 ? '#6ab7ff' : '#4cc36b');
+    $('tbar').style.background = tcol;
+    $('status').textContent = m[0];
+    $('status').className = m[1];
+
+    // Bảng chỉ số 3D trong khu vườn (chữ không dấu vì font 3D không hỗ trợ tiếng Việt)
+    if (G.signTxt) {
+      G.signTxt.setAttribute('text', 'value',
+        'Nhiet do: ' + state.temp + ' C\nDo am: ' + state.hum + ' %');
+      var tf = (state.temp - CONFIG.TEMP_MIN) / (CONFIG.TEMP_MAX - CONFIG.TEMP_MIN);
+      var hf = state.hum / 100;
+      setBar(G.tFill, tf, tcol);
+      setBar(G.hFill, hf, '#4aa8ff');
+    }
+  }
+  var BAR_W = 0.24;   // chiều dài thanh chỉ số trên biển 3D
+  function setBar(el, frac, color) {
+    frac = Math.max(0.001, frac);
+    el.object3D.scale.x = frac;
+    el.object3D.position.x = -BAR_W / 2 + (BAR_W / 2) * frac;
+    el.setAttribute('material', 'color', color);
+  }
+
+  function applyNight() {
+    var n = state.night;
+    if (G.amb) {
+      G.amb.setAttribute('light', 'intensity', n ? 0.32 : 0.9);
+      G.sunlight.setAttribute('light', 'intensity', n ? 0.35 : 0.9);
+      G.sun.setAttribute('visible', !n);
+      G.moon.setAttribute('visible', n);
+      if (!IS_AR) G.scene.setAttribute('background', 'color', n ? '#0b1030' : '#bfe6ff');
+    }
+    $('nightBtn').textContent = n ? '☀️ Ban ngày' : '🌙 Ban đêm';
+  }
+
+  function applyFrame() {
+    if (G.frame) G.frame.setAttribute('visible', state.frame);
+    $('frameBtn').textContent = '📐 Viền A3: ' + (state.frame ? 'Bật' : 'Tắt');
+    $('frameBtn').className = 'alt' + (state.frame ? ' on' : '');
+  }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2600);
+  }
+
+  /* ===================== CÁC NÚT BẤM ===================== */
+  function act(a) {
+    switch (a) {
+      case 't+': state.temp = clamp(state.temp + CONFIG.TEMP_STEP, CONFIG.TEMP_MIN, CONFIG.TEMP_MAX); break;
+      case 't-': state.temp = clamp(state.temp - CONFIG.TEMP_STEP, CONFIG.TEMP_MIN, CONFIG.TEMP_MAX); break;
+      case 'h+': state.hum = clamp(state.hum + CONFIG.HUM_STEP, 0, 100); break;
+      case 'h-': state.hum = clamp(state.hum - CONFIG.HUM_STEP, 0, 100); break;
+      case 'water':
+        state.hum = clamp(state.hum + CONFIG.WATER_ADD, 0, 100);
+        rainUntil = performance.now() + 3000;
+        break;
+      case 'night': state.night = !state.night; applyNight(); break;
+      case 'frame': state.frame = !state.frame; applyFrame(); break;
+      case 'reset':
+        state.temp = CONFIG.START_TEMP; state.hum = CONFIG.START_HUM;
+        state.night = false; applyNight(); break;
+      case 'toggle':
+        var c = $('controls'), hidden = c.style.display === 'none';
+        c.style.display = hidden ? '' : 'none';
+        $('toggle').textContent = hidden ? '▼ Thu gọn bảng điều khiển' : '▲ Mở bảng điều khiển';
+        return;
+    }
+    render();
+  }
+
+  var PRESETS = { ideal: [27, 65], dry: [34, 20], hot: [41, 50], cold: [8, 60], wet: [26, 97] };
+  function preset(p) { state.temp = PRESETS[p][0]; state.hum = PRESETS[p][1]; render(); }
+
+  $('ui').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button') : null;
+    if (!b) return;
+    if (b.getAttribute('data-a')) act(b.getAttribute('data-a'));
+    if (b.getAttribute('data-p')) preset(b.getAttribute('data-p'));
+  });
+
+  /* Dành cho giai đoạn sau: ESP32 / cảm biến thật gọi hàm này để đẩy số liệu vào mô hình.
+     Ví dụ: setSensor(31.5, 48) */
+  window.setSensor = function (temp, hum) {
+    state.temp = clamp(Math.round(temp), CONFIG.TEMP_MIN, CONFIG.TEMP_MAX);
+    state.hum = clamp(Math.round(hum), 0, 100);
+    render();
+  };
+
+  /* ===================== CHẠM VÀO VẬT THỂ ===================== */
+  function onTap(evt) {
+    var el = evt.currentTarget, a = analyse();
+    if (el._plant) el._plant.wig = 1;
+    var info = {
+      tree:   '🌳 ' + statusOf(a)[0],
+      bed:    '🥬 Luống rau & hoa: ' + statusOf(a)[0],
+      sensor: '📡 Cảm biến: ' + state.temp + '°C, độ ẩm ' + state.hum + '%',
+      sign:   '📋 Nhiệt độ ' + state.temp + '°C – Độ ẩm ' + state.hum + '%',
+      tank:   '🛢️ Bồn nước tưới – sẵn sàng (bấm "Tưới nước")',
+      pond:   '🐟 Ao nước – giúp điều hòa độ ẩm cho vườn'
+    }[el._tap] || '🌿 Khu vườn thông minh';
+    toast(info);
+  }
+
+  /* =====================================================================
+     DỰNG KHU VƯỜN 3D
+     ===================================================================== */
+  var R = { leaves: [], plants: [], blossoms: [], bedFlowers: [], soils: [], drops: [], zones: [], lamps: [], wifi: [] };
+
+  function ent(parent, attrs) {
+    var e = document.createElement('a-entity');
+    for (var k in attrs) { if (attrs[k] !== undefined && attrs[k] !== null) e.setAttribute(k, attrs[k]); }
+    parent.appendChild(e);
+    return e;
+  }
+  function mat(color, o) {
+    o = o || {};
+    var s;
+    if (o.unlit) s = 'shader: flat; color: ' + color;
+    else {
+      s = 'color: ' + color + '; roughness: 1; metalness: 0; flatShading: ' + (o.smooth ? 'false' : 'true');
+      if (o.emissive) s += '; emissive: ' + o.emissive + '; emissiveIntensity: ' + (o.ei == null ? 0.6 : o.ei);
+    }
+    if (o.opacity != null) s += '; opacity: ' + o.opacity + '; transparent: true';
+    if (o.double) s += '; side: double';
+    return s;
+  }
+  // Tạo 1 khối hình học
+  function shape(parent, geo, pos, color, o) {
+    o = o || {};
+    var a = { geometry: geo, material: mat(color, o) };
+    if (pos) a.position = v3(pos[0], pos[1], pos[2]);
+    if (o.rot) a.rotation = v3(o.rot[0], o.rot[1], o.rot[2]);
+    if (o.scale) a.scale = v3(o.scale[0], o.scale[1], o.scale[2]);
+    var e = ent(parent, a);
+    if (o.tap) {
+      e.setAttribute('class', 'clickable');
+      e._tap = o.tap; e._plant = o.plant || null;
+      e.addEventListener('click', onTap);
+    }
+    return e;
+  }
+  var box  = function (w, h, d) { return 'primitive: box; width: ' + w + '; height: ' + h + '; depth: ' + d; };
+  var cyl  = function (r, h, seg) { return 'primitive: cylinder; radius: ' + r + '; height: ' + h + '; segmentsRadial: ' + (seg || 10); };
+  var cone = function (rb, rt, h, seg) { return 'primitive: cone; radiusBottom: ' + rb + '; radiusTop: ' + rt + '; height: ' + h + '; segmentsRadial: ' + (seg || 8) + '; segmentsHeight: 1'; };
+  var ico  = function (r) { return 'primitive: icosahedron; radius: ' + r + '; detail: 1'; };
+  var sph  = function (r) { return 'primitive: sphere; radius: ' + r + '; segmentsWidth: 10; segmentsHeight: 7'; };
+
+  // Lá cây: màu sẽ đổi theo nhiệt độ / độ ẩm
+  function leaf(parent, geo, pos, shade, o) {
+    var e = shape(parent, geo, pos, '#2e9e4f', o);
+    R.leaves.push({ el: e, shade: shade || 0, m: null });
+    return e;
+  }
+  // Bóng đổ giả dưới gốc cây (nhẹ hơn bóng thật rất nhiều)
+  function blob(parent, r, op) {
+    return shape(parent, 'primitive: circle; radius: ' + r + '; segments: 20', [0, 0.0014, 0], '#000000',
+      { rot: [-90, 0, 0], opacity: op || 0.22, smooth: true });
+  }
+  function newPlant(root, crown, baseY, drop, lean) {
+    var p = { root: root, crown: crown, baseY: baseY, drop: drop, lean: lean, phase: rnd() * 6.28, wig: 0 };
+    R.plants.push(p);
+    return p;
+  }
+
+  /* ---------- Cây tròn lớn (cây chính) và cây ăn quả nhỏ ---------- */
+  function roundTree(parent, x, z, s, o) {
+    o = o || {};
+    var root = ent(parent, { position: v3(x, GY, Z(z)), scale: v3(s, s, s) });
+    R.zones.push({ x: x, z: Z(z), r: 0.2 * s + 0.02 });
+    var crown = ent(root, { position: v3(0, 0.40, 0) });
+    var p = newPlant(root, crown, 0.40, 0.07, o.lean || 1);
+    var T = { tap: 'tree', plant: p };
+
+    blob(root, 0.21, 0.22);
+    shape(root, cyl(0.085, 0.012, 14), [0, 0.006, 0], '#6b4a30');                       // đất quanh gốc
+    shape(root, cone(0.046, 0.024, 0.27, 8), [0, 0.135, 0], '#8a5a36', T);              // thân
+    shape(root, cyl(0.011, 0.13, 6), [0.036, 0.27, 0], '#8a5a36', { rot: [0, 0, -35] }); // 2 cành
+    shape(root, cyl(0.011, 0.13, 6), [-0.036, 0.265, 0], '#8a5a36', { rot: [0, 0, 35] });
+
+    // Tán lá: nhiều khối đa giác ghép lại
+    leaf(crown, ico(0.175), [0, 0.03, 0], 0, T);
+    for (var i = 0; i < 6; i++) {
+      var a = i * Math.PI / 3 + 0.26;
+      leaf(crown, ico(0.105), [Math.cos(a) * 0.135, (i % 2 ? 0.07 : -0.03), Math.sin(a) * 0.135], (i % 2 ? 0.05 : -0.04), T);
+    }
+    leaf(crown, ico(0.10), [0, 0.17, 0], 0.07, T);
+    for (var j = 0; j < 3; j++) {
+      var b = 0.5 + j * 2.094;
+      leaf(crown, ico(0.09), [Math.cos(b) * 0.165, -0.075, Math.sin(b) * 0.165], -0.07, T);
+    }
+
+    // Hoa / quả: chỉ hiện khi điều kiện lý tưởng
+    var n = o.nBlossom || 18, RR = 0.25;
+    for (var k = 0; k < n; k++) {
+      var yy = 0.9 - 1.6 * (k + 0.5) / n, rad = Math.sqrt(1 - yy * yy), ang = k * 2.39996;
+      var bl = shape(crown, sph(0.026), [Math.cos(ang) * rad * RR, 0.03 + yy * RR, Math.sin(ang) * rad * RR],
+        o.bColor || '#ff6b9d', { scale: [0.001, 0.001, 0.001], smooth: true });
+      R.blossoms.push({ el: bl });
+    }
+    return p;
+  }
+
+  /* ---------- Cây thông ---------- */
+  function pine(parent, x, z, s) {
+    var root = ent(parent, { position: v3(x, GY, Z(z)), scale: v3(s, s, s) });
+    R.zones.push({ x: x, z: Z(z), r: 0.15 * s + 0.01 });
+    var crown = ent(root, { position: v3(0, 0, 0) });
+    var p = newPlant(root, crown, 0, 0.0, 0.8);
+    var T = { tap: 'tree', plant: p };
+    blob(root, 0.17, 0.22);
+    shape(root, cyl(0.022, 0.09, 8), [0, 0.045, 0], '#7b5233', T);
+    var L = [[0.14, 0.17, 0.15], [0.11, 0.16, 0.26], [0.08, 0.14, 0.36], [0.05, 0.11, 0.45]];
+    for (var i = 0; i < L.length; i++) leaf(crown, cone(L[i][0], 0, L[i][1], 9), [0, L[i][2], 0], -0.07 + i * 0.01, T);
+    return p;
+  }
+
+  /* ---------- Bụi cây ---------- */
+  function bush(parent, x, z, s) {
+    var root = ent(parent, { position: v3(x, GY, Z(z)), scale: v3(s, s, s) });
+    R.zones.push({ x: x, z: Z(z), r: 0.07 * s + 0.01 });
+    var crown = ent(root, { position: v3(0, 0.045, 0) });
+    var p = newPlant(root, crown, 0.045, 0.012, 0.5);
+    var T = { tap: 'tree', plant: p };
+    blob(root, 0.085, 0.2);
+    leaf(crown, ico(0.062), [0, 0.01, 0], 0.02, T);
+    leaf(crown, ico(0.05), [0.06, -0.005, 0.02], -0.04, T);
+    leaf(crown, ico(0.046), [-0.055, -0.005, -0.015], 0.05, T);
+    return p;
+  }
+
+  /* ---------- Luống rau / luống hoa ---------- */
+  var FLOWER_COLORS = ['#ff6b9d', '#ffd23f', '#c77dff', '#ff8a5b', '#ffffff'];
+  function bed(parent, cx, cz, w, d, kind) {
+    var dd = d * ZS, zc = Z(cz);
+    var root = ent(parent, { position: v3(cx, GY, zc) });
+    R.zones.push({ x0: cx - w / 2 - 0.015, x1: cx + w / 2 + 0.015, z0: zc - dd / 2 - 0.015, z1: zc + dd / 2 + 0.015 });
+    var t = 0.012, h = 0.05, wood = '#a8743f', T = { tap: 'bed' };
+    shape(root, box(w, h, t), [0, h / 2, dd / 2 - t / 2], wood, T);
+    shape(root, box(w, h, t), [0, h / 2, -dd / 2 + t / 2], wood, T);
+    shape(root, box(t, h, dd - 2 * t), [w / 2 - t / 2, h / 2, 0], wood, T);
+    shape(root, box(t, h, dd - 2 * t), [-w / 2 + t / 2, h / 2, 0], wood, T);
+    var soil = shape(root, box(w - 2 * t, 0.04, dd - 2 * t), [0, 0.02, 0], '#5a4030', T);
+    R.soils.push({ el: soil, m: null });
+
+    var nx = 4, nz = 2, iw = w - 2 * t, id = dd - 2 * t;
+    for (var ix = 0; ix < nx; ix++) {
+      for (var iz = 0; iz < nz; iz++) {
+        var px = -iw / 2 + (ix + 0.5) * iw / nx, pz = -id / 2 + (iz + 0.5) * id / nz;
+        var pr = ent(root, { position: v3(px, 0.04, pz), scale: '1.3 1.3 1.3' });
+        var crown = ent(pr, { position: v3(0, 0.02, 0) });
+        var p = newPlant(pr, crown, 0.02, 0.01, 0.4);
+        var TT = { tap: 'bed', plant: p };
+        if (kind === 'veg') {
+          // cải / xà lách: vài khối dẹt xếp thành bông
+          leaf(crown, ico(0.026), [0, 0.012, 0], 0.07, TT);
+          for (var q = 0; q < 3; q++) {
+            var a = q * 2.094 + ix;
+            leaf(crown, ico(0.022), [Math.cos(a) * 0.022, 0, Math.sin(a) * 0.022], (q % 2 ? -0.03 : 0.03), TT);
+          }
+        } else {
+          // hoa: thân + 2 lá + nụ hoa nhiều màu
+          leaf(crown, cyl(0.004, 0.06, 5), [0, 0.03, 0], -0.05, TT);
+          leaf(crown, ico(0.014), [0.02, 0.022, 0], 0.03, TT);
+          leaf(crown, ico(0.014), [-0.02, 0.03, 0], 0.03, TT);
+          var fh = shape(crown, sph(0.02), [0, 0.07, 0], FLOWER_COLORS[(ix * 2 + iz) % FLOWER_COLORS.length], { smooth: true, tap: 'bed', plant: p });
+          R.bedFlowers.push({ el: fh });
+        }
+      }
+    }
+  }
+
+  /* ---------- Ao nước ---------- */
+  function pond(parent, x, z, r) {
+    var root = ent(parent, { position: v3(x, GY, Z(z)), scale: v3(1, 1, ZS) });
+    R.zones.push({ x: x, z: Z(z), r: r + 0.03 });
+    shape(root, cyl(r, 0.012, 24), [0, 0.006, 0], '#3fa7e0', { smooth: true, tap: 'pond', opacity: 0.95 });
+    for (var i = 0; i < 11; i++) {
+      var a = i * 6.2832 / 11 + 0.3;
+      shape(root, ico(0.017 + rnd() * 0.008), [Math.cos(a) * (r + 0.006), 0.012, Math.sin(a) * (r + 0.006)], i % 2 ? '#9a9a96' : '#b4b2aa', { tap: 'pond' });
+    }
+    shape(root, cyl(0.022, 0.004, 12), [0.03, 0.014, 0.01], '#3fae5a', { smooth: true });
+    shape(root, cyl(0.017, 0.004, 12), [-0.04, 0.014, -0.02], '#3fae5a', { smooth: true });
+    shape(root, sph(0.009), [0.03, 0.02, 0.01], '#ff9fc4', { smooth: true });
+  }
+
+  /* ---------- Bồn nước + đường ống + vòi tưới ---------- */
+  var SPR = [];   // vị trí vòi phun (toạ độ vườn)
+  function irrigation(parent) {
+    var tx = -0.37, tz = -0.03;
+    var tk = ent(parent, { position: v3(tx, GY, Z(tz)) });
+    R.zones.push({ x: tx, z: Z(tz), r: 0.07 });
+    blob(tk, 0.07, 0.2);
+    [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(function (s) {
+      shape(tk, box(0.01, 0.07, 0.01), [s[0] * 0.032, 0.035, s[1] * 0.032], '#6b6f73');
+    });
+    shape(tk, cyl(0.05, 0.11, 16), [0, 0.125, 0], '#3d7ec9', { tap: 'tank', smooth: true });
+    shape(tk, cone(0.05, 0.02, 0.03, 16), [0, 0.195, 0], '#2f67a8', { tap: 'tank', smooth: true });
+    shape(tk, cyl(0.006, 0.07, 6), [0, 0.035, 0], '#8f9aa3');
+
+    var pipe = '#8f9aa3', y = GY + 0.006, zp = 0.055;
+    var zA = Z(tz), zB = Z(zp);
+    shape(parent, box(0.012, 0.012, Math.abs(zB - zA)), [tx, y, (zA + zB) / 2], pipe);          // từ bồn ra
+    shape(parent, box(0.66, 0.012, 0.012), [-0.04, y, zB], pipe);                                // chạy ngang
+    SPR = [{ x: -0.29, z: 0.078 }, { x: 0.29, z: 0.098 }];
+    SPR.forEach(function (sp) {
+      var zS = Z(sp.z);
+      shape(parent, box(0.012, 0.012, Math.abs(zS - zB)), [sp.x, y, (zS + zB) / 2], pipe);        // nhánh tới vòi
+      shape(parent, cyl(0.005, 0.035, 6), [sp.x, GY + 0.0175, zS], '#6b6f73');
+      shape(parent, sph(0.011), [sp.x, GY + 0.04, zS], '#2a7fd4', { smooth: true });
+      sp.zw = zS;
+    });
+  }
+
+  /* ---------- Cột cảm biến + biểu tượng WiFi ---------- */
+  function sensorStation(parent, x, z) {
+    var g = ent(parent, { position: v3(x, GY, Z(z)) });
+    R.zones.push({ x: x, z: Z(z), r: 0.04 });
+    shape(g, cyl(0.005, 0.15, 6), [0, 0.075, 0], '#aab4bd');
+    shape(g, box(0.05, 0.034, 0.034), [0, 0.165, 0], '#f2f4f5', { tap: 'sensor' });
+    G.led = shape(g, sph(0.008), [0.016, 0.17, 0.019], '#33d17a', { emissive: '#33d17a', ei: 1, smooth: true });
+    shape(g, box(0.03, 0.002, 0.03), [0, 0.184, 0], '#1d3557');      // tấm pin nhỏ
+    for (var i = 0; i < 3; i++) {
+      var w = shape(g, 'primitive: torus; radius: ' + (0.022 + i * 0.016) + '; radiusTubular: 0.0032; arc: 90; segmentsRadial: 5; segmentsTubular: 14',
+        [0, 0.20, 0], '#4aa8ff', { rot: [0, 0, 45], unlit: true, opacity: 0.8 });
+      R.wifi.push({ el: w, m: null });
+    }
+  }
+
+  /* ---------- Đèn vườn (tự sáng khi trời tối) ---------- */
+  function lamp(parent, x, z) {
+    var g = ent(parent, { position: v3(x, GY, Z(z)) });
+    R.zones.push({ x: x, z: Z(z), r: 0.03 });
+    shape(g, cyl(0.004, 0.11, 6), [0, 0.055, 0], '#3a3f44');
+    shape(g, cone(0.018, 0.006, 0.014, 8), [0, 0.118, 0], '#3a3f44');
+    var b = shape(g, sph(0.013), [0, 0.103, 0], '#fff3c4', { emissive: '#ffd966', ei: 0.0, smooth: true });
+    R.lamps.push({ el: b, m: null, ei: 0 });
+  }
+
+  /* ---------- Biển thông số (đứng ở lối vào vườn) ---------- */
+  function infoSign(parent, x, z) {
+    var g = ent(parent, { position: v3(x, GY, Z(z)) });
+    R.zones.push({ x: x, z: Z(z), r: 0.06 });
+    shape(g, box(0.012, 0.11, 0.012), [-0.12, 0.055, 0], '#8a5a36');
+    shape(g, box(0.012, 0.11, 0.012), [0.12, 0.055, 0], '#8a5a36');
+    var board = shape(g, box(0.30, 0.13, 0.014), [0, 0.155, 0], '#2c4a3a', { tap: 'sign' });
+    var txt = ent(board, { position: v3(0, 0.022, 0.0085) });
+    txt.setAttribute('text', { value: 'Nhiet do: 27 C\nDo am: 65 %', align: 'center', anchor: 'center',
+      baseline: 'center', width: 0.78, color: '#ffffff', side: 'double' });
+    G.signTxt = txt;
+    shape(board, box(BAR_W, 0.011, 0.004), [0, -0.034, 0.0075], '#16241c');
+    shape(board, box(BAR_W, 0.011, 0.004), [0, -0.052, 0.0075], '#16241c');
+    G.tFill = shape(board, box(BAR_W, 0.011, 0.004), [0, -0.034, 0.0095], '#4cc36b', { unlit: true });
+    G.hFill = shape(board, box(BAR_W, 0.011, 0.004), [0, -0.052, 0.0095], '#4aa8ff', { unlit: true });
+  }
+
+  /* ---------- Thảm cỏ + viền gỗ + hàng rào + lối đi ---------- */
+  function ground(parent) {
+    var wood = '#9c6b3c';
+    shape(parent, box(BW, GY, BD), [0, GY / 2, 0], '#78c06a', { tap: 'bed' });
+    shape(parent, box(BW + 0.028, 0.05, 0.014), [0, 0.025, BD / 2 + 0.007], wood);
+    shape(parent, box(BW + 0.028, 0.05, 0.014), [0, 0.025, -BD / 2 - 0.007], wood);
+    shape(parent, box(0.014, 0.05, BD), [BW / 2 + 0.007, 0.025, 0], wood);
+    shape(parent, box(0.014, 0.05, BD), [-BW / 2 - 0.007, 0.025, 0], wood);
+    // vài mảng cỏ khác sắc cho đỡ đơn điệu
+    [[-0.12, -0.2, 0.11, '#86cb77'], [0.22, 0.02, 0.09, '#6fb560'], [-0.06, 0.2, 0.08, '#86cb77'], [0.12, -0.1, 0.07, '#6fb560']].forEach(function (c) {
+      shape(parent, 'primitive: circle; radius: ' + c[2] + '; segments: 20', [c[0], GY + 0.001, Z(c[1])], c[3],
+        { rot: [-90, 0, 0], smooth: true, scale: [1, ZS, 1] });
+    });
+  }
+  function fence(parent) {
+    var z0 = -BD / 2 + 0.034, col = '#e0c294', n = 9;
+    for (var i = 0; i < n; i++) {
+      var x = -0.405 + i * (0.81 / (n - 1));
+      shape(parent, box(0.013, 0.078, 0.013), [x, GY + 0.039, z0], col);
+    }
+    shape(parent, box(0.83, 0.008, 0.006), [0, GY + 0.030, z0 + 0.008], col);
+    shape(parent, box(0.83, 0.008, 0.006), [0, GY + 0.060, z0 + 0.008], col);
+  }
+  function path(parent) {
+    [0.215, 0.165, 0.115].forEach(function (z, i) {
+      shape(parent, cyl(0.03, 0.008, 12), [(i - 1) * 0.004, GY + 0.004, Z(z)], '#cfc9ba', { smooth: true, scale: [1, 1, 0.9] });
+    });
+  }
+  function grassTufts(parent, n) {
+    function blocked(x, z) {
+      for (var i = 0; i < R.zones.length; i++) {
+        var q = R.zones[i];
+        if (q.r !== undefined) { var dx = x - q.x, dz = z - q.z; if (dx * dx + dz * dz < q.r * q.r) return true; }
+        else if (x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1) return true;
+      }
+      return false;
+    }
+    var placed = 0, tries = 0;
+    while (placed < n && tries < 400) {
+      tries++;
+      var x = (rnd() - 0.5) * (BW - 0.06), z = (rnd() - 0.5) * (BD - 0.1);
+      if (blocked(x, z)) continue;
+      var h = 0.03 + rnd() * 0.03;
+      shape(parent, cone(0.011, 0, h, 5), [x, GY + h / 2, z], rnd() > 0.5 ? '#3f9a45' : '#56ad4c',
+        { rot: [(rnd() - 0.5) * 24, rnd() * 360, (rnd() - 0.5) * 24] });
+      placed++;
+    }
+  }
+
+  /* ---------- Mặt trời, mặt trăng, mây, giọt nước ---------- */
+  function sky(parent) {
+    var sp = [-0.40, 0.80, Z(-0.22)];
+    G.sun = shape(parent, sph(0.06), sp, '#ffe066', { unlit: true });
+    shape(G.sun, sph(0.095), [0, 0, 0], '#ffe9a0', { unlit: true, opacity: 0.22 });
+    G.moon = shape(parent, sph(0.05), sp, '#e8ecff', { unlit: true });
+    G.moon.setAttribute('visible', false);
+
+    G.cloud = ent(parent, { position: v3(0.02, 0.86, Z(-0.04)) });
+    [[0, 0, 0, 0.075], [0.09, -0.01, 0.01, 0.06], [-0.09, -0.012, -0.01, 0.062], [0.04, 0.03, 0, 0.055], [-0.04, 0.025, 0.02, 0.05]].forEach(function (c) {
+      shape(G.cloud, sph(c[3]), [c[0], c[1], c[2]], '#eef3f8', { smooth: true });
+    });
+    G.cloud.object3D.scale.setScalar(0.001);
+    G.cloud.setAttribute('visible', false);
+
+    G.rain = ent(parent, {});
+    G.rain.setAttribute('visible', false);
+    for (var i = 0; i < 40; i++) {
+      var d = shape(G.rain, sph(0.0075), [0, 1, 0], '#4aa8ff', { unlit: true });
+      if (i < 26) R.drops.push({ el: d, kind: 'rain', x: (rnd() - 0.5) * 0.76, z: (rnd() - 0.5) * 0.46 * ZS, ph: rnd() });
+      else R.drops.push({ el: d, kind: 'spr', k: i % 2, a: rnd() * 6.2832, ph: rnd(), rr: 0.07 + rnd() * 0.07 });
+    }
+  }
+
+  /* ---------- Viền đỏ quanh tờ A3 (để kiểm tra khớp mốc) ---------- */
+  function paperFrame(parent) {
+    var g = ent(parent, {});
+    var c = '#ff3b30', t = 0.006, y = 0.003;
+    shape(g, box(1 + t, t, t), [0, y, D / 2], c, { unlit: true });
+    shape(g, box(1 + t, t, t), [0, y, -D / 2], c, { unlit: true });
+    shape(g, box(t, t, D), [0.5, y, 0], c, { unlit: true });
+    shape(g, box(t, t, D), [-0.5, y, 0], c, { unlit: true });
+    shape(g, box(0.1, t, t), [0, y, 0], c, { unlit: true });      // dấu thập giữa tờ
+    shape(g, box(t, t, 0.1), [0, y, 0], c, { unlit: true });
+    g.setAttribute('visible', state.frame);
+    return g;
+  }
+
+  function buildGarden(parent) {
+    var pivot = ent(parent, {});
+    G.pivot = pivot;
+
+    ground(pivot);
+    fence(pivot);
+
+    // Cây lớn ở giữa + cây phụ
+    roundTree(pivot, 0.0, -0.06, CONFIG.TREE_SCALE, { nBlossom: 20 });
+    pine(pivot, -0.33, -0.19, 0.95);
+    roundTree(pivot, 0.375, 0.035, 0.55, { nBlossom: 10, bColor: '#ff9f1c', drop: 0.7 });
+    bush(pivot, -0.41, -0.27, 1.0);
+    bush(pivot, 0.41, -0.27, 1.0);
+    bush(pivot, -0.17, -0.265, 0.85);
+    bush(pivot, 0.17, -0.265, 0.85);
+
+    // Luống rau (trái) và luống hoa (phải)
+    bed(pivot, -0.29, 0.17, 0.26, 0.13, 'veg');
+    bed(pivot, 0.29, 0.19, 0.26, 0.12, 'flower');
+
+    pond(pivot, 0.31, -0.15, 0.095);
+    irrigation(pivot);
+    sensorStation(pivot, -0.17, -0.02);
+    lamp(pivot, -0.10, 0.12);
+    lamp(pivot, 0.10, 0.12);
+    path(pivot);
+    infoSign(pivot, 0.0, 0.272);
+    grassTufts(pivot, CONFIG.GRASS_TUFTS);
+    sky(pivot);
+  }
+
+  /* =====================================================================
+     DỰNG CẢNH (AR hoặc XEM THỬ)
+     ===================================================================== */
+  function start(targetUrl) {
+    var sceneHTML;
+    if (IS_AR) {
+      sceneHTML =
+        '<a-scene id="scene" mindar-image="imageTargetSrc: ' + targetUrl + '; filterMinCF: ' + CONFIG.FILTER_MIN_CF +
+          '; filterBeta: ' + CONFIG.FILTER_BETA + '; warmupTolerance: ' + CONFIG.WARMUP + '; missTolerance: ' + CONFIG.MISS + ';" ' +
+          'color-space="sRGB" renderer="colorManagement: true" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">' +
+          '<a-camera id="cam" position="0 0 0" look-controls="enabled: false" cursor="fuse: false; rayOrigin: mouse;" raycaster="far: 10000; interval: 200; objects: .clickable"></a-camera>' +
+          '<a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>' +
+        '</a-scene>';
+    } else {
+      sceneHTML =
+        '<a-scene id="scene" background="color: #bfe6ff" vr-mode-ui="enabled: false" renderer="colorManagement: true" device-orientation-permission-ui="enabled: false">' +
+          '<a-camera id="cam" fov="55" position="0 1 2" rotation="-25 0 0" look-controls="enabled: false" wasd-controls="enabled: false" cursor="fuse: false; rayOrigin: mouse;" raycaster="far: 100; interval: 200; objects: .clickable"></a-camera>' +
+        '</a-scene>';
+    }
+    document.body.insertAdjacentHTML('afterbegin', sceneHTML);
+
+    var scene = $('scene');
+    G.scene = scene;
+    var host = IS_AR ? $('target') : scene;
+
+    var stage = ent(host, IS_AR
+      ? { rotation: '90 0 0', scale: CONFIG.AR_SCALE + ' ' + CONFIG.AR_SCALE + ' ' + CONFIG.AR_SCALE }
+      : {});
+    if (!IS_AR) {
+      // Xem thử: đặt "mặt bàn" và tờ giấy A3 phía dưới khu vườn
+      shape(scene, 'primitive: plane; width: 14; height: 14', [0, -0.002, 0], '#cdb98f', { rot: [-90, 0, 0], smooth: true });
+      shape(scene, 'primitive: plane; width: 1; height: ' + D, [0, 0, 0], '#fbf8ef', { rot: [-90, 0, 0], smooth: true });
+    }
+
+    // Ánh sáng (hướng sáng cố định theo tờ giấy)
+    G.amb = ent(stage, { light: 'type: ambient; color: #ffffff; intensity: 0.9' });
+    ent(stage, { id: 'ltarget', position: '0 0 0' });
+    G.sunlight = ent(stage, { light: 'type: directional; color: #ffffff; intensity: 0.9; target: #ltarget', position: '0.6 1.6 1.0' });
+
+    buildGarden(stage);
+    G.frame = paperFrame(stage);
+
+    // Hoạt hình
+    var T = AFRAME.THREE;
+    var C = {
+      leafBase: new T.Color('#2e9e4f'), leafDry: new T.Color('#b58f2c'), leafWet: new T.Color('#1b6b66'),
+      leafHot: new T.Color('#d9782b'),  leafCold: new T.Color('#6fb3b8'),
+      soilDry: new T.Color('#b08a5a'),  soilWet: new T.Color('#3a2a20'),
+      sunA: new T.Color('#ffe066'),     sunB: new T.Color('#ff5a1f'),
+      ok: new T.Color('#33d17a'),       warn: new T.Color('#ffb020'), bad: new T.Color('#ff4d4f')
+    };
+    var cur = { leaf: new T.Color('#2e9e4f'), soil: new T.Color('#5a4030'), sun: new T.Color('#ffe066'),
+                stress: 0, flower: 0, cloud: 0, lamp: 0 };
+    var tmp = new T.Color();
+    function matOf(o, el) {
+      if (!o.m) { var me = (el || o.el).getObject3D('mesh'); if (me && me.material) o.m = me.material; }
+      return o.m;
+    }
+
+    function frame() {
+      requestAnimationFrame(frame);
+      if (!scene.hasLoaded) return;
+      var now = performance.now(), a = analyse(), i, o, m;
+
+      // 1) Màu lá: xanh -> vàng / cam / xanh nhạt / xanh đậm tuỳ tình trạng
+      var sc = { dry: C.leafDry, wet: C.leafWet, hot: C.leafHot, cold: C.leafCold }[a.key];
+      tmp.copy(C.leafBase);
+      if (sc) tmp.lerp(sc, clamp(a.stress * 1.1, 0, 1));
+      cur.leaf.lerp(tmp, 0.06);
+      for (i = 0; i < R.leaves.length; i++) {
+        o = R.leaves[i]; m = matOf(o);
+        if (m) m.color.copy(cur.leaf).offsetHSL(0, 0, o.shade);
+      }
+
+      // 2) Màu đất: khô sáng màu, ướt sẫm màu
+      tmp.copy(C.soilDry).lerp(C.soilWet, state.hum / 100);
+      cur.soil.lerp(tmp, 0.08);
+      for (i = 0; i < R.soils.length; i++) { m = matOf(R.soils[i]); if (m) m.color.copy(cur.soil); }
+
+      // 3) Cây xệ xuống / nghiêng khi bị stress; đung đưa nhẹ; rung khi chạm
+      cur.stress += (a.stress - cur.stress) * 0.06;
+      var st = cur.stress;
+      for (i = 0; i < R.plants.length; i++) {
+        var p = R.plants[i];
+        p.crown.object3D.scale.set(1 + 0.05 * st, 1 - 0.42 * st, 1 + 0.05 * st);
+        p.crown.object3D.position.y = p.baseY - p.drop * st;
+        p.wig *= 0.94;
+        p.root.object3D.rotation.z = 0.26 * st * p.lean * (a.key === 'cold' ? 0.3 : 1)
+          + Math.sin(now / 700 + p.phase) * 0.018
+          + Math.sin(now / 45) * 0.1 * p.wig;
+      }
+
+      // 4) Hoa / quả nở khi điều kiện lý tưởng; hoa ở luống hoa héo khi cây stress
+      cur.flower += ((a.ideal ? 1 : 0) - cur.flower) * 0.08;
+      var bl = Math.max(0.001, cur.flower), vis = cur.flower > 0.03;
+      for (i = 0; i < R.blossoms.length; i++) {
+        o = R.blossoms[i]; o.el.object3D.scale.setScalar(bl); o.el.object3D.visible = vis;
+      }
+      var bf = 1 - clamp(st * 2, 0, 0.8);
+      for (i = 0; i < R.bedFlowers.length; i++) R.bedFlowers[i].el.object3D.scale.setScalar(bf);
+
+      // 5) Mặt trời: to hơn và đỏ hơn khi nhiệt độ cao
+      var ss = (0.75 + clamp((state.temp - 10) / 35, 0, 1) * 0.8) * (1 + 0.04 * Math.sin(now / 300));
+      G.sun.object3D.scale.setScalar(ss);
+      tmp.copy(C.sunA).lerp(C.sunB, clamp((state.temp - 25) / 15, 0, 1));
+      cur.sun.lerp(tmp, 0.08);
+      var sm = G.sun.getObject3D('mesh'); if (sm && sm.material) sm.material.color.copy(cur.sun);
+
+      // 6) Mây + mưa + vòi phun khi bấm "Tưới nước"
+      var raining = now < rainUntil;
+      cur.cloud += ((raining ? 1 : 0) - cur.cloud) * 0.12;
+      G.cloud.object3D.visible = cur.cloud > 0.03;
+      G.cloud.object3D.scale.setScalar(Math.max(0.001, cur.cloud));
+      G.rain.object3D.visible = raining;
+      if (raining) {
+        for (i = 0; i < R.drops.length; i++) {
+          var d = R.drops[i], ph = (now / 1000 * 0.9 + d.ph) % 1;
+          if (d.kind === 'rain') {
+            d.el.object3D.position.set(d.x, 0.84 - ph * (0.84 - GY), d.z);
+          } else {
+            var sp = SPR[d.k], r = ph * d.rr;
+            d.el.object3D.position.set(sp.x + Math.cos(d.a) * r, GY + 0.045 + 0.09 * Math.sin(Math.PI * ph) , sp.zw + Math.sin(d.a) * r);
+          }
+        }
+      }
+
+      // 7) Đèn LED cảm biến đổi màu theo tình trạng + biểu tượng WiFi nhấp nháy
+      var key = (a.key === 'ok') ? 'ok' : ((a.key === 'dry' || a.key === 'hot') ? 'bad' : 'warn');
+      var lm = G.led.getObject3D('mesh');
+      if (lm && lm.material) {
+        lm.material.color.lerp(C[key], 0.15);
+        lm.material.emissive.copy(lm.material.color);
+        lm.material.emissiveIntensity = 0.5 + 0.5 * (0.5 + 0.5 * Math.sin(now / 250));
+      }
+      for (i = 0; i < R.wifi.length; i++) {
+        o = R.wifi[i]; m = matOf(o);
+        if (m) m.opacity = 0.15 + 0.85 * Math.max(0, Math.sin(now / 380 - i * 0.9));
+      }
+
+      // 8) Đèn vườn tự sáng khi trời tối
+      cur.lamp += ((state.night ? 1 : 0) - cur.lamp) * 0.08;
+      for (i = 0; i < R.lamps.length; i++) {
+        o = R.lamps[i]; m = matOf(o);
+        if (m) { m.emissiveIntensity = 1.4 * cur.lamp; }
+      }
+    }
+
+    /* ---- Camera xem thử tự co giãn cho vừa khung hình ---- */
+    function fitDemoCamera() {
+      if (IS_AR) return;
+      var cam = $('cam'), aspect = window.innerWidth / window.innerHeight;
+      var vf = 55 * Math.PI / 180, hf = 2 * Math.atan(Math.tan(vf / 2) * aspect);
+      var dist = Math.max((1.18 / 2) / Math.tan(hf / 2), (0.95 / 2) / Math.tan(vf / 2));
+      var pitch = 30 * Math.PI / 180, ty = 0.22;
+      cam.setAttribute('position', v3(0, ty + dist * Math.sin(pitch), dist * Math.cos(pitch)));
+      cam.setAttribute('rotation', '-30 0 0');
+    }
+
+    /* ---- Kéo để xoay khu vườn (CHỈ ở chế độ xem thử; chế độ AR khoá theo tờ giấy) ---- */
+    if (!IS_AR) {
+      var drag = null;
+      window.addEventListener('pointerdown', function (e) {
+        if (e.target.closest && e.target.closest('#hud, #panel, #modeLink')) return;
+        drag = { x: e.clientX };
+      });
+      window.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        G.pivot.object3D.rotation.y += (e.clientX - drag.x) * 0.01;
+        drag.x = e.clientX;
+      });
+      window.addEventListener('pointerup', function () { drag = null; });
+      window.addEventListener('pointercancel', function () { drag = null; });
+      window.addEventListener('resize', fitDemoCamera);
+      fitDemoCamera();
+    }
+
+    /* ---- Thông báo trạng thái AR ---- */
+    if (IS_AR) {
+      $('modeLink').textContent = '🖥️ Xem thử (không cần camera)';
+      $('modeLink').href = '?mode=demo';
+      var usingSample = (targetUrl === CONFIG.SAMPLE_TARGET);
+      var hint = usingSample ? '⚠️ Chưa có targets.mind – đang dùng ảnh mẫu.<br>' : '';
+      $('track').innerHTML = hint + '📷 Hướng camera vào tờ A3...';
+      var tg = $('target');
+      tg.addEventListener('targetFound', function () { $('track').innerHTML = hint + '✅ Đã khoá vào tờ A3'; });
+      tg.addEventListener('targetLost', function () { $('track').innerHTML = hint + '📷 Mất mốc, hãy hướng camera lại tờ A3...'; });
+      scene.addEventListener('arError', function () {
+        $('track').textContent = '⚠️ Không mở được camera. Hãy cho phép camera và mở bằng link https://';
+      });
+    } else {
+      $('modeLink').textContent = '📷 Chế độ AR (camera)';
+      $('modeLink').href = '?mode=ar';
+      $('track').textContent = 'Chế độ xem thử – kéo chuột/ngón tay để xoay khu vườn, chạm vào cây/bồn nước/cảm biến';
+    }
+
+    applyFrame();
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  /* ===================== KHỞI ĐỘNG ===================== */
+  if (IS_AR) {
+    var override = params.get('target');
+    if (override) start(override);
+    else {
+      // Tự tìm targets.mind (tờ A3 của bạn); không có thì dùng ảnh mẫu
+      fetch(CONFIG.TARGET_FILE, { cache: 'no-cache' })
+        .then(function (r) {
+          var ct = r.headers.get('content-type') || '';
+          return (r.ok && ct.indexOf('text/html') < 0) ? CONFIG.TARGET_FILE : CONFIG.SAMPLE_TARGET;
+        })
+        .catch(function () { return CONFIG.SAMPLE_TARGET; })
+        .then(start);
+    }
+  } else {
+    start(null);
+  }
+})();
+</script>
+</body>
+</html>
